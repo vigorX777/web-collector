@@ -1,0 +1,9 @@
+.cache/
+__pycache__/
+*.pyc
+.DS_Store
+*.log
+.env
+.env.*
+output/
+tmp/
