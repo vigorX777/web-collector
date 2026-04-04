@@ -34,6 +34,44 @@ description: "当用户在聊天窗口发送一个或多个链接，并希望默
 - 原文先通过 `web-access` 导出为 Markdown，再补充头部元数据
 - 网页抓取失败时直接报错，不允许 fallback
 
+## 依赖边界
+
+这里需要明确区分两层：
+
+1. `web-collector` 的依赖
+2. 云端如何实现 `web-access`
+
+`web-collector` 本身只依赖 `web-access` 的输出契约，不直接依赖 `OpenClaw browser`。
+
+它真正要求的是：上游最终要能提供一个 payload，至少包含：
+
+```json
+{
+  "title": "页面标题",
+  "url": "https://example.com/post",
+  "source": "来源站点",
+  "markdown_path": "/tmp/web-collector/raw/example.md",
+  "route": "internal"
+}
+```
+
+如果云端的 `web-access` 恰好是基于 `OpenClaw browser` 实现的，那么：
+
+- `OpenClaw browser` 只是运行环境实现细节
+- 不是 `web-collector` 的设计依赖
+
+因此，当云端出现 Chrome/CORS/WebSocket 问题时，应判断为：
+
+- `web-access` 运行环境不满足
+- 而不是 `web-collector` 依赖错了工具
+
+运行前真正需要检查的是：
+
+- Chrome / Chromium 是否可用
+- CDP 是否可用
+- `web-access` proxy 是否可用
+- 是否能导出 `markdown_path`
+
 ## 工作流
 
 ```text

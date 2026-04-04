@@ -70,6 +70,45 @@ web-collector/
 http://127.0.0.1:3456
 ```
 
+### web-collector 与 OpenClaw browser 的边界
+
+这里需要特别说明：
+
+- `web-collector` 不直接依赖 `OpenClaw browser`
+- `web-collector` 只依赖 `web-access` 的输出契约
+- 这个契约的核心是：上游最终能提供页面正文对应的 `markdown_path`，以及 `title`、`url`、`source`
+
+也就是说，`web-collector` 只关心：
+
+```json
+{
+  "title": "...",
+  "url": "...",
+  "source": "...",
+  "markdown_path": "/tmp/....md",
+  "route": "internal"
+}
+```
+
+至于云端的 `web-access` 背后具体怎么实现：
+
+- 是直接连 Chrome CDP
+- 是本地 proxy
+- 还是某个浏览器自动化工具
+
+这些都属于运行环境实现，不属于 `web-collector` 本身的设计要求。
+
+如果云端把 `web-access` 实现为 `OpenClaw browser`，而 `OpenClaw browser` 因 Chrome/CORS/WebSocket 问题失效，那么应该被视为：
+
+- `web-access` 运行环境未满足
+- 而不是 `web-collector` 依赖了 `OpenClaw browser`
+
+当前推荐原则：
+
+- `web-collector` 保持只依赖 `web-access` 契约
+- 云端应使用可控的 Chrome/CDP 实现来满足 `web-access`
+- 不要把 `OpenClaw browser` 当作 `web-collector` 的必需依赖
+
 ### 3. OneDrive 应用注册
 
 需要先在 Microsoft Entra 中注册一个支持个人 Microsoft 账号的应用，并启用 public client flow。
@@ -248,7 +287,20 @@ $CODEX_HOME/skills/web-collector -> /opt/skills-src/web-collector
 
 只要 `web-access` 无法打开页面、读取 DOM 或导出原始 Markdown，流程就会报错停止。
 
-### 4. X / 动态网站依赖浏览器上下文
+这条规则指的是 `web-access` 契约是否满足，不指向某个特定浏览器工具实现。
+
+### 4. 运行前检查的是契约，不是 OpenClaw
+
+部署时真正应该检查的是：
+
+- Chrome / Chromium 是否启动
+- CDP 端口是否可连接
+- `web-access` proxy 是否可用
+- 是否能成功导出 `markdown_path`
+
+不应该把“OpenClaw browser 能不能工作”作为 `web-collector` 的前置判断条件。
+
+### 5. X / 动态网站依赖浏览器上下文
 
 像 X 这种站点通常必须通过浏览器 DOM 抓取，静态 HTTP 抓取不可靠。
 
