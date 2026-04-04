@@ -13,7 +13,7 @@ from collections import OrderedDict
 CANONICAL_RULES = OrderedDict({
     "Git": ["git"],
     "Symlink": ["symlink", "symbolic link", "软链接", "符号链接"],
-    "Codex CLI": ["codex cli", "codex"],
+    "CodexCLI": ["codex cli", "codex-cli", "codexcli", "codex"],
     "技能管理": ["skills 管理", "skill 管理", "技能管理", "skills maintenance", "skill maintenance"],
     "人工智能": ["人工智能", "ai", "a.i."],
     "大语言模型": ["大语言模型", "大模型", "llm", "large language model"],
@@ -28,10 +28,10 @@ CANONICAL_RULES = OrderedDict({
     "Python": ["python"],
     "JavaScript": ["javascript", "js"],
     "OneDrive": ["onedrive"],
-    "Microsoft Graph": ["microsoft graph", "graph api"],
+    "MicrosoftGraph": ["microsoft graph", "graph api", "microsoft-graph", "microsoftgraph"],
     "微信公众号": ["微信公众号", "微信公众平台", "mp.weixin.qq.com"],
     "Reddit": ["reddit"],
-    "X/Twitter": ["x.com", "twitter", "tweet", "推特"],
+    "XTwitter": ["x.com", "twitter", "tweet", "x/twitter", "x-twitter", "推特"],
 })
 
 GENERIC_FALLBACK_TAGS = [
@@ -50,6 +50,9 @@ STOPWORD_TAGS = {
     "示例",
     "skills",
     "cli",
+    "CLI",
+    "Microsoft",
+    "Graph",
     "团队内的",
     "用的",
     "目录为例）",
@@ -57,6 +60,20 @@ STOPWORD_TAGS = {
     "维护的一点经验分享",
     "的一点经验分享",
 }
+
+REDUNDANT_TAG_GROUPS = {
+    "技能管理": {"管理", "技能", "skill", "skills"},
+    "CodexCLI": {"Codex", "CLI", "cli"},
+    "MicrosoftGraph": {"Microsoft", "Graph", "graph"},
+    "XTwitter": {"Twitter", "X", "推特"},
+}
+
+
+def normalize_tag_for_obsidian(tag: str) -> str:
+    cleaned = tag.strip().replace("\u3000", " ")
+    cleaned = cleaned.replace("/", "")
+    cleaned = re.sub(r"[\s\-_]+", "", cleaned)
+    return cleaned
 
 
 def load_content(content_file: str) -> str:
@@ -69,10 +86,10 @@ def canonicalize_tag(tag: str) -> str:
     lowered = raw.lower()
     for canonical, variants in CANONICAL_RULES.items():
         if lowered == canonical.lower():
-            return canonical
+            return normalize_tag_for_obsidian(canonical)
         if lowered in {variant.lower() for variant in variants}:
-            return canonical
-    return raw
+            return normalize_tag_for_obsidian(canonical)
+    return normalize_tag_for_obsidian(raw)
 
 
 def detect_tags(text: str) -> list[str]:
@@ -119,10 +136,32 @@ def unique_preserve_order(items: list[str]) -> list[str]:
     result = []
     for item in items:
         normalized = canonicalize_tag(item)
+        if not normalized:
+            continue
         if normalized not in seen:
             seen.add(normalized)
             result.append(normalized)
     return result
+
+
+def prune_redundant_tags(tags: list[str]) -> list[str]:
+    tag_set = set(tags)
+    result = []
+    for tag in tags:
+        redundant = REDUNDANT_TAG_GROUPS.get(tag, set())
+        if any(other in tag_set and other in redundant for other in tag_set if other != tag):
+            pass
+        result.append(tag)
+
+    pruned = []
+    for tag in result:
+        if any(
+            tag in redundant and canonical in result
+            for canonical, redundant in REDUNDANT_TAG_GROUPS.items()
+        ):
+            continue
+        pruned.append(tag)
+    return pruned
 
 
 def generate_tags(title: str, content: str, minimum: int = 5) -> list[str]:
@@ -131,11 +170,13 @@ def generate_tags(title: str, content: str, minimum: int = 5) -> list[str]:
     tags.extend(detect_tags(title))
     tags.extend(detect_tags(content[:12000]))
     tags = unique_preserve_order(tags)
+    tags = prune_redundant_tags(tags)
 
     if len(tags) < minimum:
         for fallback in GENERIC_FALLBACK_TAGS:
-            if fallback not in tags:
-                tags.append(fallback)
+            normalized = canonicalize_tag(fallback)
+            if normalized not in tags:
+                tags.append(normalized)
             if len(tags) >= minimum:
                 break
 

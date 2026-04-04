@@ -10,6 +10,7 @@ import re
 from datetime import datetime
 
 from deduplicate import normalize_url
+from tag_rules import normalize_tag_for_obsidian
 
 
 def sanitize_filename(name: str) -> str:
@@ -23,7 +24,9 @@ def parse_tags(raw: str) -> list[str]:
     for item in raw.split(","):
         item = item.strip()
         if item:
-            tags.append(item)
+            normalized = normalize_tag_for_obsidian(item)
+            if normalized:
+                tags.append(normalized)
     return tags
 
 

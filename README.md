@@ -187,6 +187,7 @@ python3 scripts/collect_from_web_access.py \
 - 英文仅用于产品名、标准术语、API 名、语言名
 - 同义词会归一
 - 不允许同义词中英混用成两份标签
+- 标签最终写入 Markdown 前会做 Obsidian 兼容处理，不保留空格；多词标签会统一成紧凑写法，例如 `CodexCLI`、`MicrosoftGraph`
 
 当前内置了一些基础规则，例如：
 
@@ -198,7 +199,7 @@ python3 scripts/collect_from_web_access.py \
 - `知识管理`
 - `Git`
 - `Symlink`
-- `Codex CLI`
+- `CodexCLI`
 
 ## 部署建议
 
