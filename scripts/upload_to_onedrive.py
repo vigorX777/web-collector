@@ -17,6 +17,18 @@ TOKEN_URL = "https://login.microsoftonline.com/consumers/oauth2/v2.0/token"
 GRAPH_ROOT = "https://graph.microsoft.com/v1.0"
 DEFAULT_SCOPE = "Files.ReadWrite offline_access"
 
+# 代理设置
+PROXY_HOST = os.environ.get("ONEDRIVE_PROXY_HOST", "127.0.0.1:7890")
+
+
+def get_proxy_handler():
+    """创建代理处理器"""
+    proxy_url = f"http://{PROXY_HOST}"
+    return urllib.request.ProxyHandler({
+        'http': proxy_url,
+        'https': proxy_url
+    })
+
 
 def error(code: str, message: str, retryable: bool = False) -> None:
     print(json.dumps({
@@ -34,7 +46,12 @@ def post_form(url: str, payload: dict) -> dict:
     body = urllib.parse.urlencode(payload).encode("utf-8")
     request = urllib.request.Request(url, data=body, method="POST")
     request.add_header("Content-Type", "application/x-www-form-urlencoded")
-    with urllib.request.urlopen(request) as response:
+    
+    # 使用代理
+    proxy_handler = get_proxy_handler()
+    opener = urllib.request.build_opener(proxy_handler)
+    
+    with opener.open(request) as response:
         return json.loads(response.read().decode("utf-8"))
 
 
@@ -94,8 +111,12 @@ def upload_file(file_path: str, access_token: str, target_dir: str) -> dict:
     request = urllib.request.Request(upload_url, data=body, method="PUT")
     request.add_header("Authorization", f"Bearer {access_token}")
     request.add_header("Content-Type", content_type)
+    
+    # 使用代理
+    proxy_handler = get_proxy_handler()
+    opener = urllib.request.build_opener(proxy_handler)
 
-    with urllib.request.urlopen(request) as response:
+    with opener.open(request) as response:
         return json.loads(response.read().decode("utf-8"))
 
 
