@@ -1,16 +1,16 @@
 # web-collector
 
-`web-collector` 是一个面向内部收藏场景的 Skill。
+`web-collector` 是一个面向内部收藏场景的独立 Skill。
 
-它的目标很简单：当用户在聊天中发送一个或多个链接时，默认进入 `internal` 路由，强制通过 `web-access` 抓取网页内容，保留完整原文，整理为 Markdown，并上传到 OneDrive 指定目录下的当天文件夹。
+它的目标是：当用户在聊天中发送一个或多个链接时，默认进入 `internal` 路由，根据平台自动选择合适的抓取器提取正文内容，整理为 Markdown，并上传到 OneDrive 指定目录下的当天文件夹。
 
 ## 适用场景
 
 - 聊天窗口收到网页链接，希望自动收藏
-- 需要保留完整原文，而不是只保留摘要
+- 需要保留原文内容，而不是只保留摘要
 - 需要统一输出为 Markdown 文件
 - 需要将结果上传到 OneDrive 个人账号
-- 需要每天自动按日期分文件夹归档
+- 需要为不同平台逐步接入不同抓取器
 
 不适用：
 
@@ -25,13 +25,20 @@
 1. 接收一个或多个链接
 2. 默认进入 `internal` 路由
 3. 做平台检测和 URL 标准化
-4. 做 URL 去重
-5. 调用 `web-access` 抓取页面
-6. 从 `web-access` 页面结果导出原始 Markdown 和 payload
+4. 根据平台注册表选择抓取器
+5. 抓取器导出原始 Markdown 和 payload
+6. 做 URL 去重
 7. 生成中文优先标签
 8. 组装最终 Markdown 文件
 9. 上传到 OneDrive 基准目录下的当天日期子目录
 10. 成功后写入本地缓存，避免重复收藏
+
+## 当前抓取器
+
+| 平台 | 抓取器 | 说明 |
+|------|--------|------|
+| 普通网页 / 微信公众号 / 现有默认平台 | `defuddle` | 默认抓取器，支持通用网页正文提取，包含微信公众号普通文与短文适配 |
+| X / Twitter | `x-tweet-fetcher` | 当前只接入单条 Tweet / X Article 抓取，不包含 replies / timeline / monitor |
 
 ## 仓库结构
 
@@ -41,13 +48,18 @@ web-collector/
   SKILL.md
   scripts/
     extract_content.py
-    deduplicate.py
-    export_from_web_access.py
-    tag_rules.py
+    export_from_defuddle.py
+    collect_from_defuddle.py
     build_markdown.py
-    collect_from_web_access.py
-    onedrive_device_code.py
+    deduplicate.py
+    tag_rules.py
     upload_to_onedrive.py
+    onedrive_device_code.py
+    extractors/
+      registry.py
+      shared.py
+      defuddle_extractor.py
+      twitter_extractor.py
 ```
 
 ## 依赖与前期准备
@@ -56,58 +68,26 @@ web-collector/
 
 需要 Python 3.9 或更高版本。
 
-### 2. web-access
+### 2. 抓取器依赖
 
-本仓库不包含浏览器控制器本身，依赖外部 `web-access` Skill 提供：
+默认网页抓取依赖 `defuddle` CLI：
 
-- Chrome / Chromium CDP 连接
-- 本地代理接口
-- 页面打开与 DOM 读取能力
+```bash
+npm install -g defuddle
+```
 
-`web-collector` 默认假设 `web-access` 代理运行在：
+Twitter 抓取依赖同级 skill `x-tweet-fetcher`，默认按 sibling skill 目录查找：
 
 ```text
-http://127.0.0.1:3456
+$CODEX_HOME/skills/web-collector
+$CODEX_HOME/skills/x-tweet-fetcher
 ```
 
-### web-collector 与 OpenClaw browser 的边界
+如果云端目录结构不同，可通过环境变量覆盖：
 
-这里需要特别说明：
-
-- `web-collector` 不直接依赖 `OpenClaw browser`
-- `web-collector` 只依赖 `web-access` 的输出契约
-- 这个契约的核心是：上游最终能提供页面正文对应的 `markdown_path`，以及 `title`、`url`、`source`
-
-也就是说，`web-collector` 只关心：
-
-```json
-{
-  "title": "...",
-  "url": "...",
-  "source": "...",
-  "markdown_path": "/tmp/....md",
-  "route": "internal"
-}
+```bash
+WEB_COLLECTOR_X_TWEET_FETCHER_DIR=/absolute/path/to/x-tweet-fetcher
 ```
-
-至于云端的 `web-access` 背后具体怎么实现：
-
-- 是直接连 Chrome CDP
-- 是本地 proxy
-- 还是某个浏览器自动化工具
-
-这些都属于运行环境实现，不属于 `web-collector` 本身的设计要求。
-
-如果云端把 `web-access` 实现为 `OpenClaw browser`，而 `OpenClaw browser` 因 Chrome/CORS/WebSocket 问题失效，那么应该被视为：
-
-- `web-access` 运行环境未满足
-- 而不是 `web-collector` 依赖了 `OpenClaw browser`
-
-当前推荐原则：
-
-- `web-collector` 保持只依赖 `web-access` 契约
-- 云端应使用可控的 Chrome/CDP 实现来满足 `web-access`
-- 不要把 `OpenClaw browser` 当作 `web-collector` 的必需依赖
 
 ### 3. OneDrive 应用注册
 
@@ -122,17 +102,6 @@ http://127.0.0.1:3456
 可选：
 
 - `ONEDRIVE_CLIENT_SECRET`
-
-### 4. OneDrive 首次授权
-
-在本地执行：
-
-```bash
-ONEDRIVE_CLIENT_ID="<your-client-id>" \
-python3 scripts/onedrive_device_code.py
-```
-
-完成浏览器登录后，保存返回的最新 `refresh_token` 到云端密钥管理。
 
 ## 环境变量
 
@@ -150,38 +119,26 @@ ONEDRIVE_TARGET_PATH=/✒️ 文稿项目/剪藏文件
 ONEDRIVE_CLIENT_SECRET=<optional>
 WEB_COLLECTOR_OUTPUT_DIR=/tmp/web-collector-output
 WEB_COLLECTOR_RAW_DIR=/tmp/web-collector-raw
-WEB_ACCESS_PROXY_ROOT=http://127.0.0.1:3456
+WEB_COLLECTOR_X_TWEET_FETCHER_DIR=/opt/skills-src/x-tweet-fetcher
 ```
-
-## OneDrive 路径规则
-
-`ONEDRIVE_TARGET_PATH` 是基准目录。
-
-上传时会自动追加当天日期子目录，例如：
-
-```text
-/✒️ 文稿项目/剪藏文件/2026-04-04/
-```
-
-每条链接会生成一个独立 Markdown 文件。
 
 ## 使用方式
 
-### 方式 1：从已打开的 web-access 页面继续处理
+### 方式 1：直接抓取 URL 并继续处理
 
-这是推荐方式。
-
-先让 `web-access` 打开页面，拿到 `targetId`，然后执行：
+这是推荐方式。入口脚本名暂时仍保留 `export_from_defuddle.py`，但内部已经会按平台自动选择抓取器。
 
 ```bash
-python3 scripts/export_from_web_access.py --target <TARGET_ID> --output-dir /tmp/web-collector-raw
-python3 scripts/collect_from_web_access.py --payload-file /tmp/web-collector-raw/<file>.md.payload.json
+python3 scripts/export_from_defuddle.py --url "https://example.com/post" --output-dir /tmp/web-collector-raw
+python3 scripts/collect_from_defuddle.py --payload-file /tmp/web-collector-raw/<file>.md.payload.json
 ```
 
-第一步会生成：
+第一步会自动：
 
-- 原始 Markdown 文件
-- 一个 sidecar payload JSON
+- 检测平台
+- 选择抓取器
+- 生成原始 Markdown 文件
+- 生成 sidecar payload JSON
 
 第二步会自动完成：
 
@@ -196,10 +153,10 @@ python3 scripts/collect_from_web_access.py --payload-file /tmp/web-collector-raw
 如果上游系统已经能提供 payload，可以直接执行：
 
 ```bash
-python3 scripts/collect_from_web_access.py --payload-file /tmp/web-access-export.json
+python3 scripts/collect_from_defuddle.py --payload-file /tmp/extractor-export.json
 ```
 
-payload 格式：
+payload 至少包含：
 
 ```json
 {
@@ -214,10 +171,30 @@ payload 格式：
 ### 方式 3：本地只验证，不上传 OneDrive
 
 ```bash
-python3 scripts/collect_from_web_access.py \
-  --payload-file /tmp/web-access-export.json \
+python3 scripts/collect_from_defuddle.py \
+  --payload-file /tmp/extractor-export.json \
   --skip-upload
 ```
+
+## 平台检测输出
+
+运行：
+
+```bash
+python3 scripts/extract_content.py "https://x.com/user/status/123"
+```
+
+返回结果会包含：
+
+- `platform_id`
+- `platform_label`
+- `skill`
+- `extractor`
+
+其中：
+
+- `skill` 保留为兼容字段
+- `extractor` 是当前内部标准字段，表示实际选中的抓取器
 
 ## 标签规则
 
@@ -226,19 +203,6 @@ python3 scripts/collect_from_web_access.py \
 - 英文仅用于产品名、标准术语、API 名、语言名
 - 同义词会归一
 - 不允许同义词中英混用成两份标签
-- 标签最终写入 Markdown 前会做 Obsidian 兼容处理，不保留空格；多词标签会统一成紧凑写法，例如 `CodexCLI`、`MicrosoftGraph`
-
-当前内置了一些基础规则，例如：
-
-- `人工智能`
-- `大语言模型`
-- `智能体`
-- `工作流`
-- `自动化`
-- `知识管理`
-- `Git`
-- `Symlink`
-- `CodexCLI`
 
 ## 部署建议
 
@@ -248,85 +212,40 @@ python3 scripts/collect_from_web_access.py \
 2. 云端拉取固定 tag 或固定 commit
 3. 通过软链接或固定路径挂到 Skill 目录
 4. 用 Secret Manager 注入 OneDrive 凭证
-5. 在运行环境中保证 `web-access` 和 Chrome CDP 可用
-
-推荐部署形式：
-
-```text
-/opt/skills-src/web-collector
-$CODEX_HOME/skills/web-collector -> /opt/skills-src/web-collector
-```
-
-不建议：
-
-- 云端直接追 `main` 最新提交
-- 把 `refresh_token`、`client_secret` 提交进 Git
-- 把测试输出和缓存一并提交到公共仓库
+5. 在运行环境中保证所需抓取器可用
 
 ## 部署注意事项
 
-### 1. refresh token 会轮换
-
-每次成功刷新 token 后，微软可能返回新的 `refresh_token`。
-
-生产环境应保存最新值，否则未来可能失效。
-
-### 2. 公共仓库不要提交密钥
-
-请确保以下内容永远不进仓库：
-
-- `ONEDRIVE_REFRESH_TOKEN`
-- `ONEDRIVE_CLIENT_SECRET`
-- 云端环境配置文件
-- 临时输出目录
-- `.cache/`
-
-### 3. web-access 是硬依赖
+### 1. 无 fallback
 
 本 Skill 当前不做 fallback。
 
-只要 `web-access` 无法打开页面、读取 DOM 或导出原始 Markdown，流程就会报错停止。
+平台一旦选定抓取器，抓取失败就会直接报错停止。
 
-这条规则指的是 `web-access` 契约是否满足，不指向某个特定浏览器工具实现。
-
-### 4. 运行前检查的是契约，不是 OpenClaw
+### 2. 当前检查项
 
 部署时真正应该检查的是：
 
-- Chrome / Chromium 是否启动
-- CDP 端口是否可连接
-- `web-access` proxy 是否可用
+- `defuddle` 命令是否可用
+- `x-tweet-fetcher` 路径是否可访问
+- 目标 URL 是否可访问
 - 是否能成功导出 `markdown_path`
-
-不应该把“OpenClaw browser 能不能工作”作为 `web-collector` 的前置判断条件。
-
-### 5. X / 动态网站依赖浏览器上下文
-
-像 X 这种站点通常必须通过浏览器 DOM 抓取，静态 HTTP 抓取不可靠。
-
-这也是本 Skill 强制依赖 `web-access` 的原因。
-
-## 发布与更新建议
-
-推荐流程：
-
-1. 本地修改并测试
-2. 提交到 Git
-3. 打 tag，例如 `v0.1.0`
-4. 云端部署固定 tag
-5. 新版本验证通过后再升级
 
 ## 当前限制
 
 - 只做 URL 去重，不做语义去重
 - 不做分类字段
 - 标签规则仍然是基础版，后续可以继续增强
-- 对不同站点的正文提取目前主要依赖 DOM 文本，不是站点专用解析器
+- X / Twitter 当前只支持单条 Tweet / X Article，不支持 replies / timeline
+- 新平台需要通过新增适配器模块接入，不会自动发现外部 skill
 
-## 许可证与公开发布前检查
+## 变更日志
 
-在上传到公共 GitHub 仓库前，请再次确认：
+后续每次功能、接口、文档或依赖变更，都应在这里按日期追加记录，最新变更放在最上面。
 
-- 仓库中没有真实 token、secret、cookie
-- 仓库中没有本地缓存和调试输出
-- README 中没有暴露你的私有 OneDrive 链接或账号信息
+| 版本 | 日期 | 变更内容 |
+|------|------|----------|
+| `v0.3.0` | `2026-04-05` | 将抓取层改造成平台注册表 + 可插拔适配器架构；新增 Twitter/X 抓取器接入，通过 `x-tweet-fetcher` 处理单条 Tweet / X Article；保留原有导出入口脚本名以兼容现有调用方。 |
+| `v0.2.2` | `2026-04-05` | 新增微信公众号专用正文提取逻辑：优先提取 `#js_content`，短文场景回退到 `text_page_info.content_noencode`，解决公众号短文正文抓取不完整的问题。 |
+| `v0.2.1` | `2026-04-05` | 新增微信公众号正文噪音过滤规则，屏蔽“继续滑动看下一个”“向上滑动看下一个”“知道了”“微信扫一扫”“使用小程序”以及点赞、在看、分享、留言、收藏等交互提示文案。 |
+| `v0.2.0` | `2026-04-05` | 将内容抓取链路从 `web-access` 全量替换为 `defuddle`；新增 `scripts/export_from_defuddle.py`；将 `scripts/collect_from_web_access.py` 重命名为 `scripts/collect_from_defuddle.py`；更新 `scripts/extract_content.py` 中的抓取器标记；清理 README 和 SKILL 中与 Chrome、CDP、proxy、`targetId` 相关的旧说明。 |
