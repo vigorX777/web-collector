@@ -3,7 +3,7 @@
 Single-entry orchestrator for web-collector.
 
 It consumes an extractor export payload, then runs:
-deduplicate -> AI analysis (title + summary + tags) -> markdown assembly -> OneDrive upload -> cache update.
+deduplicate -> AI analysis (title + summary + candidate tags) -> tag normalization -> markdown assembly -> OneDrive upload -> cache update.
 """
 
 import argparse
@@ -15,6 +15,7 @@ from build_markdown import build_markdown_file
 from deduplicate import add_to_cache, is_duplicate
 from extract_content import detect_platform
 from ai_content_analyzer import analyze_content, load_content
+from tag_rules import normalize_candidate_tags
 from upload_to_onedrive import upload_markdown_file
 
 
@@ -86,7 +87,8 @@ def main() -> None:
     parser.add_argument("--markdown-path")
     parser.add_argument("--route", default="internal")
     parser.add_argument("--output-dir", default=os.environ.get("WEB_COLLECTOR_OUTPUT_DIR", os.path.join(os.path.dirname(__file__), "..", ".cache", "output")))
-    parser.add_argument("--minimum-tags", type=int, default=5)
+    parser.add_argument("--minimum-tags", type=int, default=3)
+    parser.add_argument("--maximum-tags", type=int, default=5)
     parser.add_argument("--skip-upload", action="store_true")
     args = parser.parse_args()
 
@@ -104,37 +106,26 @@ def main() -> None:
     content = load_content(payload["markdown_path"])
     source = derive_source(payload, platform)
 
-    # 合并 AI 调用：一次生成标题 + 摘要 + 标签
-    generated_title, summary, tags_dict = analyze_content(payload["title"], content, source)
+    generated_title, summary, candidate_tags = analyze_content(
+        payload["title"],
+        content,
+        source,
+        url=payload["url"],
+    )
+    normalized_tags = normalize_candidate_tags(
+        candidate_tags,
+        title=payload["title"],
+        content=content,
+        source=source,
+        minimum=args.minimum_tags,
+        maximum=args.maximum_tags,
+    )
 
-    # 验证并扁平化标签
-    tags = []
-    tags.extend(tags_dict.get("对象", [])[:2])
-    tags.extend(tags_dict.get("场景", [])[:1])
-    tags.extend(tags_dict.get("类型", [])[:1])
-    tags.extend(tags_dict.get("方法", [])[:1])
-
-    # 规范化标签
-    seen = set()
-    normalized_tags = []
-    for tag in tags:
-        tag = tag.strip().lower()
-        if tag and tag not in seen:
-            seen.add(tag)
-            normalized_tags.append(tag)
-
-    # 确保至少 minimum-tags 个标签
-    while len(normalized_tags) < args.minimum_tags:
-        fallback = ["资料归档", "知识管理", "原文备份", "学习资源", "工具推荐"]
-        for f in fallback:
-            if f not in normalized_tags:
-                normalized_tags.append(f)
-                break
-        if len(normalized_tags) >= args.minimum_tags:
-            break
-
-    # 使用生成的标题
-    final_title = generated_title if generated_title else payload["title"]
+    # 默认保留抓取器提取出的原标题，AI 标题仅作为增强信息保留
+    final_title = payload["title"]
+    use_ai_title = os.environ.get("WEB_COLLECTOR_USE_AI_TITLE", "").strip().lower() in {"1", "true", "yes"}
+    if use_ai_title and generated_title:
+        final_title = generated_title
 
     try:
         markdown_result = build_markdown_file(
@@ -143,8 +134,10 @@ def main() -> None:
             url=payload["url"],
             route=route,
             content_file=payload["markdown_path"],
-            tags=normalized_tags[:args.minimum_tags],
+            tags=normalized_tags,
             output_dir=args.output_dir,
+            original_title=payload["title"],
+            generated_title=generated_title or None,
         )
     except FileNotFoundError as error:
         emit_error("MARKDOWN_EXPORT_FAILED", str(error))
@@ -174,7 +167,8 @@ def main() -> None:
             "generated_title": generated_title,
             "title": final_title,
             "summary": summary,
-            "tags": normalized_tags[:args.minimum_tags],
+            "candidate_tags": candidate_tags,
+            "tags": normalized_tags,
             "markdown": markdown_result,
             "upload": upload_result,
             "cached": upload_result is not None,

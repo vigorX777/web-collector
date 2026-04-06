@@ -30,8 +30,9 @@ description: "当用户在聊天窗口发送一个或多个链接，并希望默
 - 一个链接生成一个 Markdown 文件
 - 只做 URL 去重
 - 不做分类
-- 标签至少 5 个
-- 标签以中文为主；产品名、API 名、编程语言、标准技术术语可保留英文
+- 标签默认输出 3 到 5 个
+- 标签只允许来自三类：核心对象、AI 概念、业务场景
+- AI 概念统一英文标准词且不能有空格；业务场景统一中文
 - 网页抓取失败时直接报错，不允许 fallback
 - 下游 payload 契约保持稳定
 
@@ -92,6 +93,17 @@ python3 scripts/export_from_defuddle.py --url "https://example.com/post"
 ```bash
 python3 scripts/collect_from_defuddle.py --payload-file /tmp/extractor-export.json
 ```
+
+## 标签与标题
+
+- AI 只生成候选标签，规则层负责最终规范化
+- 标签会统一做：
+  - 同义词归一
+  - Obsidian 兼容
+  - 英文标准词收口
+  - 低价值标签过滤
+- 默认保留抓取器提取出的原标题
+- AI 标题只作为增强信息保留；如需覆盖主标题，可通过 `WEB_COLLECTOR_USE_AI_TITLE=1` 启用
 
 ## 平台检测
 

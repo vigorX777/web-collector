@@ -8,6 +8,7 @@ import json
 import os
 import re
 from datetime import datetime
+from typing import Optional
 
 from deduplicate import normalize_url
 from tag_rules import normalize_tag_for_obsidian
@@ -36,6 +37,31 @@ def load_markdown(path: str) -> str:
 
 
 def build_frontmatter(title: str, source: str, url: str, normalized_url: str, route: str, tags: list[str], collected_at: str) -> str:
+    return build_frontmatter_with_extras(
+        title=title,
+        source=source,
+        url=url,
+        normalized_url=normalized_url,
+        route=route,
+        tags=tags,
+        collected_at=collected_at,
+        original_title=None,
+        generated_title=None,
+    )
+
+
+def build_frontmatter_with_extras(
+    *,
+    title: str,
+    source: str,
+    url: str,
+    normalized_url: str,
+    route: str,
+    tags: list[str],
+    collected_at: str,
+    original_title: Optional[str],
+    generated_title: Optional[str],
+) -> str:
     lines = [
         "---",
         f"title: {title}",
@@ -48,6 +74,10 @@ def build_frontmatter(title: str, source: str, url: str, normalized_url: str, ro
     ]
     for tag in tags:
         lines.append(f"  - {tag}")
+    if original_title and original_title != title:
+        lines.append(f"original_title: {original_title}")
+    if generated_title and generated_title != title:
+        lines.append(f"generated_title: {generated_title}")
     lines.append("---")
     return "\n".join(lines)
 
@@ -61,6 +91,8 @@ def build_markdown_file(
     content_file: str,
     tags: list[str],
     output_dir: str,
+    original_title: Optional[str] = None,
+    generated_title: Optional[str] = None,
 ) -> dict:
     if not os.path.exists(content_file):
         raise FileNotFoundError(f"Content file not found: {content_file}")
@@ -75,7 +107,7 @@ def build_markdown_file(
     filename = f"{sanitize_filename(safe_title)} - {file_date}.md"
     output_path = os.path.abspath(os.path.join(output_dir, filename))
 
-    frontmatter = build_frontmatter(
+    frontmatter = build_frontmatter_with_extras(
         title=safe_title,
         source=source.strip(),
         url=url.strip(),
@@ -83,6 +115,8 @@ def build_markdown_file(
         route=route.strip(),
         tags=tags,
         collected_at=collected_at,
+        original_title=original_title.strip() if original_title else None,
+        generated_title=generated_title.strip() if generated_title else None,
     )
 
     final_content = f"{frontmatter}\n\n# 原文\n\n{body}\n"

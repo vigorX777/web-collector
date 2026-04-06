@@ -1,39 +1,55 @@
 # Web Collector 配置指南
 
-## 安装状态
-✅ Skill 已安装到 `~/.openclaw/workspace/skills/web-collector`
-✅ 旧 content-collector-skill 已禁用
+## 1. 基础依赖
 
-## 配置步骤
+### Python
 
-### 1. 获取 Microsoft 应用凭证
+需要 Python 3.9 或更高版本。
 
-1. 访问 https://portal.azure.com/#blade/Microsoft_AAD_RegisteredApps/ApplicationsListBlade
-2. 点击 "New registration"
-3. 填写应用名称（如：WebCollector）
-4. 选择 "Personal Microsoft accounts only"
-5. 点击 "Register"
-6. 记录 **Application (client) ID**
+### 抓取器
 
-### 2. 获取 Refresh Token
+默认网页抓取依赖 `defuddle`：
 
-在本地机器（有浏览器环境）执行：
+```bash
+npm install -g defuddle
+```
+
+X / Twitter 抓取依赖同级 skill `x-tweet-fetcher`：
+
+```text
+$CODEX_HOME/skills/web-collector
+$CODEX_HOME/skills/x-tweet-fetcher
+```
+
+如果云端目录结构不同，可通过环境变量覆盖：
+
+```bash
+export WEB_COLLECTOR_X_TWEET_FETCHER_DIR="/absolute/path/to/x-tweet-fetcher"
+```
+
+## 2. OneDrive 配置
+
+### 获取 Microsoft 应用凭证
+
+1. 访问 Azure / Entra 应用注册页面
+2. 创建一个支持个人 Microsoft 账号的应用
+3. 记录 `Application (client) ID`
+4. 启用 public client flow
+
+### 获取 Refresh Token
+
+在本地有浏览器环境的机器执行：
 
 ```bash
 cd ~/.openclaw/workspace/skills/web-collector
 python3 scripts/onedrive_device_code.py
 ```
 
-按照提示：
-1. 复制显示的 code
-2. 访问 https://microsoft.com/devicelogin
-3. 登录你的 Microsoft 账号
-4. 授权应用访问 OneDrive
-5. 脚本会输出 refresh_token，保存好
+完成登录授权后，保存返回的 `refresh_token`。
 
-### 3. 配置环境变量
+## 3. 环境变量
 
-在 OpenClaw 环境中设置：
+至少需要：
 
 ```bash
 export ONEDRIVE_CLIENT_ID="your_client_id"
@@ -41,55 +57,87 @@ export ONEDRIVE_REFRESH_TOKEN="your_refresh_token"
 export ONEDRIVE_TARGET_PATH="/Documents/WebClips"
 ```
 
-或者写入 `~/.openclaw/workspace/skills/web-collector/.env` 文件
-
-### 4. 测试运行
+可选：
 
 ```bash
-# 测试单个链接
-cd ~/.openclaw/workspace/skills/web-collector/scripts
-python3 collect_from_web_access.py \
+export WEB_COLLECTOR_OUTPUT_DIR="/tmp/web-collector-output"
+export WEB_COLLECTOR_RAW_DIR="/tmp/web-collector-raw"
+export WEB_COLLECTOR_X_TWEET_FETCHER_DIR="/opt/skills-src/x-tweet-fetcher"
+export WEB_COLLECTOR_USE_AI_TITLE="0"
+export ONEDRIVE_TOKEN_CACHE_FILE="/tmp/web-collector-onedrive-token.json"
+export ONEDRIVE_TOKEN_CACHE_BUFFER="300"
+```
+
+说明：
+
+- `WEB_COLLECTOR_USE_AI_TITLE=0`
+  - 默认保留抓取器提取出的原标题
+- `WEB_COLLECTOR_USE_AI_TITLE=1`
+  - 允许用 AI 标题覆盖最终标题，同时保留 `original_title`
+- `ONEDRIVE_TOKEN_CACHE_FILE`
+  - OneDrive access token 本地缓存文件路径
+- `ONEDRIVE_TOKEN_CACHE_BUFFER`
+  - 提前多久视为即将过期并主动刷新，单位秒
+
+## 4. 测试运行
+
+### 测试导出抓取 payload
+
+```bash
+cd ~/.openclaw/workspace/skills/web-collector
+python3 scripts/export_from_defuddle.py \
   --url "https://example.com" \
-  --title "Example Page" \
-  --source "example.com" \
-  --markdown-path /tmp/test.md \
+  --output-dir /tmp/web-collector-raw
+```
+
+### 测试下游组装但不上传
+
+```bash
+python3 scripts/collect_from_defuddle.py \
+  --payload-file /tmp/web-collector-raw/<file>.md.payload.json \
   --skip-upload
 ```
 
-## 使用方式
+## 5. 当前行为说明
 
-发送链接时说"收藏"，系统会自动：
-1. 使用 web-access skill 抓取页面
-2. 生成标签（至少5个）
-3. 组装 Markdown（含元数据头部）
-4. 上传到 OneDrive
-5. 写入本地缓存
+### 抓取器选择
 
-## 输出格式
+- 普通网页 / 微信公众号 → `defuddle`
+- X / Twitter → `x-tweet-fetcher`
 
-生成的 Markdown 文件示例：
+### 标签策略
 
-```markdown
----
-title: 页面标题
-source: 站点名
-source_url: https://example.com/post
-normalized_url: https://example.com/post
-collected_at: 2026-04-04T12:00:00+08:00
-route: internal
-tags:
-  - 标签1
-  - 标签2
-  - 标签3
-  - 标签4
-  - 标签5
----
+- 默认生成 3 到 5 个标签
+- AI 只负责生成候选标签
+- 规则层负责：
+  - 同义词归一
+  - Obsidian 兼容
+  - 英文标准词收口
+  - 低价值标签过滤
 
-# 原文
+### 标题策略
 
-...完整正文 Markdown...
-```
+- 默认使用原始标题
+- AI 标题仅作为增强信息
 
-文件名格式：`标题 - YYYY-MM-DD.md`
+### OneDrive 上传优化
 
-存储路径：`ONEDRIVE_TARGET_PATH/YYYY-MM-DD/`
+- 上传时优先使用本地缓存的 access token
+- token 即将过期或上传返回 `401` 时会自动刷新并重试一次
+
+## 6. 输出格式
+
+生成的 Markdown 文件包含：
+
+- `title`
+- `source`
+- `source_url`
+- `normalized_url`
+- `collected_at`
+- `route`
+- `tags`
+
+在启用 AI 标题覆盖时，还会额外包含：
+
+- `original_title`
+- `generated_title`

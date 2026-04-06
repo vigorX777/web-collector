@@ -28,7 +28,7 @@
 4. 根据平台注册表选择抓取器
 5. 抓取器导出原始 Markdown 和 payload
 6. 做 URL 去重
-7. 生成中文优先标签
+7. 生成 3-5 个高检索价值标签
 8. 组装最终 Markdown 文件
 9. 上传到 OneDrive 基准目录下的当天日期子目录
 10. 成功后写入本地缓存，避免重复收藏
@@ -120,6 +120,9 @@ ONEDRIVE_CLIENT_SECRET=<optional>
 WEB_COLLECTOR_OUTPUT_DIR=/tmp/web-collector-output
 WEB_COLLECTOR_RAW_DIR=/tmp/web-collector-raw
 WEB_COLLECTOR_X_TWEET_FETCHER_DIR=/opt/skills-src/x-tweet-fetcher
+WEB_COLLECTOR_USE_AI_TITLE=0
+ONEDRIVE_TOKEN_CACHE_FILE=/tmp/web-collector-onedrive-token.json
+ONEDRIVE_TOKEN_CACHE_BUFFER=300
 ```
 
 ## 使用方式
@@ -198,11 +201,34 @@ python3 scripts/extract_content.py "https://x.com/user/status/123"
 
 ## 标签规则
 
-- 至少生成 5 个标签
-- 中文优先
-- 英文仅用于产品名、标准术语、API 名、语言名
-- 同义词会归一
-- 不允许同义词中英混用成两份标签
+- 默认生成 3 到 5 个标签
+- 标签只允许来自三类：
+  - 核心对象：人、产品、工具、组织、项目、协议、事件
+  - AI 概念：统一英文标准词且不能有空格，如 `Agent`、`Workflow`、`PromptEngineering`
+  - 业务场景：统一中文，如 `知识管理`、`办公自动化`、`代码生成`
+- AI 只负责生成候选标签，规则层负责最终规范化
+- 同义词会归一，例如：
+  - `智能体` → `Agent`
+  - `工作流` → `Workflow`
+  - `提示工程` → `PromptEngineering`
+  - `记忆系统` → `MemorySystem`
+  - `Claude Code` → `ClaudeCode`
+  - `Open Claw` → `OpenClaw`
+  - `Twitter` / `X` → `XTwitter`
+- 不输出低价值标签，如 `资料归档`、`原文备份`、`网页收藏`
+- 最终写入前会做 Obsidian 兼容规范化
+
+## 标题策略
+
+- 默认保留抓取器提取出的原标题作为最终标题
+- AI 生成标题只作为增强信息保留，不默认覆盖主标题
+- 如需启用 AI 标题覆盖，可设置：
+
+```bash
+WEB_COLLECTOR_USE_AI_TITLE=1
+```
+
+- 当启用 AI 标题覆盖时，frontmatter 会额外保留 `original_title`
 
 ## 部署建议
 
@@ -230,6 +256,15 @@ python3 scripts/extract_content.py "https://x.com/user/status/123"
 - `x-tweet-fetcher` 路径是否可访问
 - 目标 URL 是否可访问
 - 是否能成功导出 `markdown_path`
+- OneDrive token 缓存路径是否可写
+
+### 3. OneDrive token 缓存
+
+- 上传时会优先复用本地缓存的 access token
+- 只有缓存不存在、即将过期或上传返回 `401` 时，才会重新 refresh token
+- 可选环境变量：
+  - `ONEDRIVE_TOKEN_CACHE_FILE`
+  - `ONEDRIVE_TOKEN_CACHE_BUFFER`
 
 ## 当前限制
 
@@ -245,6 +280,8 @@ python3 scripts/extract_content.py "https://x.com/user/status/123"
 
 | 版本 | 日期 | 变更内容 |
 |------|------|----------|
+| `v0.3.2` | `2026-04-07` | 完成五项稳定性优化：标签规范统一收口（AI 只生成候选标签，规则层负责同义词归一、英文标准词与 Obsidian 兼容）、标题策略调整为“原标题优先，AI 标题可选增强”、AI 调用改为唯一 session、内容分析改为分段采样；同时新增 OneDrive access token 本地缓存与 `401` 自动刷新重试，降低批量收藏时的上传耗时。 |
+| `v0.3.1` | `2026-04-07` | 收口标签规范：AI 只生成候选标签，规则层负责同义词归一、英文标准词、业务场景中文化和 Obsidian 兼容；标题策略调整为“原标题优先，AI 标题可选增强”；AI 调用改为唯一 session；内容截断改为分段采样；同步清理 SETUP 文档。 |
 | `v0.3.0` | `2026-04-05` | 将抓取层改造成平台注册表 + 可插拔适配器架构；新增 Twitter/X 抓取器接入，通过 `x-tweet-fetcher` 处理单条 Tweet / X Article；保留原有导出入口脚本名以兼容现有调用方。 |
 | `v0.2.2` | `2026-04-05` | 新增微信公众号专用正文提取逻辑：优先提取 `#js_content`，短文场景回退到 `text_page_info.content_noencode`，解决公众号短文正文抓取不完整的问题。 |
 | `v0.2.1` | `2026-04-05` | 新增微信公众号正文噪音过滤规则，屏蔽“继续滑动看下一个”“向上滑动看下一个”“知道了”“微信扫一扫”“使用小程序”以及点赞、在看、分享、留言、收藏等交互提示文案。 |
