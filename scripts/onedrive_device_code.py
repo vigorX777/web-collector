@@ -11,10 +11,13 @@ import urllib.parse
 import urllib.request
 from urllib.error import HTTPError
 
+from env_loader import load_env_file
 
 DEVICE_CODE_URL = "https://login.microsoftonline.com/consumers/oauth2/v2.0/devicecode"
 TOKEN_URL = "https://login.microsoftonline.com/consumers/oauth2/v2.0/token"
 SCOPES = "offline_access Files.ReadWrite"
+
+load_env_file()
 
 
 def post_form(url: str, payload: dict) -> dict:

@@ -49,6 +49,8 @@ description: "当用户在聊天窗口发送一个或多个链接，并希望默
 
 `web-collector` 本身只依赖“抓取器输出契约”，不直接依赖某一个抓取实现。
 
+所有入口脚本会自动加载 skill 根目录下的 `.env`，系统环境变量优先于 `.env`。
+
 上游最终至少要能提供一个 payload：
 
 ```json
@@ -173,3 +175,4 @@ python3 scripts/extract_content.py "https://x.com/user/status/123"
 - OneDrive 目标目录
 - `defuddle` 在目标运行环境中可用
 - `x-tweet-fetcher` 在目标运行环境中可访问
+- `.env` 文件在目标运行环境中可读（若依赖 `.env` 配置）

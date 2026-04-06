@@ -11,12 +11,15 @@ import json
 import os
 from urllib.parse import urlparse
 
+from env_loader import load_env_file
 from build_markdown import build_markdown_file
 from deduplicate import add_to_cache, is_duplicate
 from extract_content import detect_platform
 from ai_content_analyzer import analyze_content, load_content
 from tag_rules import normalize_candidate_tags
 from upload_to_onedrive import upload_markdown_file
+
+load_env_file()
 
 
 def emit_error(code: str, message: str, retryable: bool = False) -> None:

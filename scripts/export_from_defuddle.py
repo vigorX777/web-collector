@@ -10,6 +10,7 @@ import argparse
 import json
 import os
 
+from env_loader import load_env_file
 from extractors.registry import detect_platform, get_extractor
 from extractors.shared import (
     ExtractionError,
@@ -18,6 +19,8 @@ from extractors.shared import (
     write_markdown,
     write_payload,
 )
+
+load_env_file()
 
 
 DEFAULT_OUTPUT_DIR = os.environ.get(

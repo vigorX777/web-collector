@@ -66,6 +66,7 @@ export WEB_COLLECTOR_X_TWEET_FETCHER_DIR="/opt/skills-src/x-tweet-fetcher"
 export WEB_COLLECTOR_USE_AI_TITLE="0"
 export ONEDRIVE_TOKEN_CACHE_FILE="/tmp/web-collector-onedrive-token.json"
 export ONEDRIVE_TOKEN_CACHE_BUFFER="300"
+export WEB_COLLECTOR_ENV_FILE="/root/.openclaw/workspace/skills/web-collector/.env"
 ```
 
 说明：
@@ -78,6 +79,13 @@ export ONEDRIVE_TOKEN_CACHE_BUFFER="300"
   - OneDrive access token 本地缓存文件路径
 - `ONEDRIVE_TOKEN_CACHE_BUFFER`
   - 提前多久视为即将过期并主动刷新，单位秒
+- `WEB_COLLECTOR_ENV_FILE`
+  - 显式指定 `.env` 文件路径；默认自动读取 skill 根目录下的 `.env`
+
+说明：
+
+- 入口脚本会自动加载 `.env`
+- 如果系统环境里已经 export 了同名变量，则优先使用系统环境值，不会被 `.env` 覆盖
 
 ## 4. 测试运行
 

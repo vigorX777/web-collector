@@ -13,10 +13,14 @@ import urllib.request
 from urllib.error import HTTPError
 from datetime import datetime
 
+from env_loader import load_env_file
 
 TOKEN_URL = "https://login.microsoftonline.com/consumers/oauth2/v2.0/token"
 GRAPH_ROOT = "https://graph.microsoft.com/v1.0"
 DEFAULT_SCOPE = "Files.ReadWrite offline_access"
+
+load_env_file()
+
 CACHE_FILE = os.environ.get(
     "ONEDRIVE_TOKEN_CACHE_FILE",
     os.path.join(os.path.dirname(__file__), "..", ".cache", "onedrive_access_token.json"),

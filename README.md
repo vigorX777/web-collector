@@ -125,6 +125,16 @@ ONEDRIVE_TOKEN_CACHE_FILE=/tmp/web-collector-onedrive-token.json
 ONEDRIVE_TOKEN_CACHE_BUFFER=300
 ```
 
+说明：
+
+- 所有入口脚本会自动加载 skill 根目录下的 `.env`
+- 环境变量优先级为：系统环境 > `.env` > 代码默认值
+- 如需显式指定 `.env` 路径，可设置：
+
+```bash
+WEB_COLLECTOR_ENV_FILE=/absolute/path/to/.env
+```
+
 ## 使用方式
 
 ### 方式 1：直接抓取 URL 并继续处理
@@ -280,6 +290,7 @@ WEB_COLLECTOR_USE_AI_TITLE=1
 
 | 版本 | 日期 | 变更内容 |
 |------|------|----------|
+| `v0.3.3` | `2026-04-07` | 新增统一 `.env` 自动加载：入口脚本会默认读取 skill 根目录下的 `.env`，并保持“系统环境优先、`.env` 兜底”的优先级；支持通过 `WEB_COLLECTOR_ENV_FILE` 显式指定配置文件路径，解决云端必须手动 export 环境变量的问题。 |
 | `v0.3.2` | `2026-04-07` | 完成五项稳定性优化：标签规范统一收口（AI 只生成候选标签，规则层负责同义词归一、英文标准词与 Obsidian 兼容）、标题策略调整为“原标题优先，AI 标题可选增强”、AI 调用改为唯一 session、内容分析改为分段采样；同时新增 OneDrive access token 本地缓存与 `401` 自动刷新重试，降低批量收藏时的上传耗时。 |
 | `v0.3.1` | `2026-04-07` | 收口标签规范：AI 只生成候选标签，规则层负责同义词归一、英文标准词、业务场景中文化和 Obsidian 兼容；标题策略调整为“原标题优先，AI 标题可选增强”；AI 调用改为唯一 session；内容截断改为分段采样；同步清理 SETUP 文档。 |
 | `v0.3.0` | `2026-04-05` | 将抓取层改造成平台注册表 + 可插拔适配器架构；新增 Twitter/X 抓取器接入，通过 `x-tweet-fetcher` 处理单条 Tweet / X Article；保留原有导出入口脚本名以兼容现有调用方。 |
