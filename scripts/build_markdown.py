@@ -10,7 +10,6 @@ import re
 from datetime import datetime
 from typing import Optional
 
-from deduplicate import normalize_url
 from tag_rules import normalize_tag_for_obsidian
 
 
@@ -36,12 +35,11 @@ def load_markdown(path: str) -> str:
         return handle.read().strip()
 
 
-def build_frontmatter(title: str, source: str, url: str, normalized_url: str, route: str, tags: list[str], collected_at: str) -> str:
+def build_frontmatter(title: str, source: str, url: str, route: str, tags: list[str], collected_at: str) -> str:
     return build_frontmatter_with_extras(
         title=title,
         source=source,
         url=url,
-        normalized_url=normalized_url,
         route=route,
         tags=tags,
         collected_at=collected_at,
@@ -55,23 +53,22 @@ def build_frontmatter_with_extras(
     title: str,
     source: str,
     url: str,
-    normalized_url: str,
     route: str,
     tags: list[str],
     collected_at: str,
     original_title: Optional[str],
     generated_title: Optional[str],
 ) -> str:
+    source_url = url.strip()
     lines = [
         "---",
         f"title: {title}",
         f"source: {source}",
-        f"source_url: {url}",
-        f"normalized_url: {normalized_url}",
+        f"source_url: {source_url}",
         f"collected_at: {collected_at}",
         f"route: {route}",
-        "tags:",
     ]
+    lines.append("tags:")
     for tag in tags:
         lines.append(f"  - {tag}")
     if original_title and original_title != title:
@@ -99,7 +96,6 @@ def build_markdown_file(
 
     os.makedirs(output_dir, exist_ok=True)
 
-    normalized_url = normalize_url(url)
     collected_at = datetime.now().astimezone().isoformat(timespec="seconds")
     body = load_markdown(content_file)
     safe_title = title.strip() or "未命名"
@@ -111,7 +107,6 @@ def build_markdown_file(
         title=safe_title,
         source=source.strip(),
         url=url.strip(),
-        normalized_url=normalized_url,
         route=route.strip(),
         tags=tags,
         collected_at=collected_at,
@@ -126,7 +121,6 @@ def build_markdown_file(
     return {
         "output_path": output_path,
         "filename": filename,
-        "normalized_url": normalized_url,
         "collected_at": collected_at,
     }
 

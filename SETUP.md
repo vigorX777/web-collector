@@ -140,7 +140,6 @@ python3 scripts/collect_from_defuddle.py \
 - `title`
 - `source`
 - `source_url`
-- `normalized_url`
 - `collected_at`
 - `route`
 - `tags`
