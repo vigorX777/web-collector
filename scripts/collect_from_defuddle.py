@@ -139,6 +139,7 @@ def main() -> None:
             content_file=payload["markdown_path"],
             tags=normalized_tags,
             output_dir=args.output_dir,
+            summary=summary or None,
             original_title=payload["title"],
             generated_title=generated_title or None,
         )

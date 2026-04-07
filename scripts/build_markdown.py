@@ -43,6 +43,7 @@ def build_frontmatter(title: str, source: str, url: str, route: str, tags: list[
         route=route,
         tags=tags,
         collected_at=collected_at,
+        summary=None,
         original_title=None,
         generated_title=None,
     )
@@ -56,6 +57,7 @@ def build_frontmatter_with_extras(
     route: str,
     tags: list[str],
     collected_at: str,
+    summary: Optional[str],
     original_title: Optional[str],
     generated_title: Optional[str],
 ) -> str:
@@ -68,6 +70,8 @@ def build_frontmatter_with_extras(
         f"collected_at: {collected_at}",
         f"route: {route}",
     ]
+    if summary and summary.strip():
+        lines.append(f"summary: {summary.strip()}")
     lines.append("tags:")
     for tag in tags:
         lines.append(f"  - {tag}")
@@ -88,6 +92,7 @@ def build_markdown_file(
     content_file: str,
     tags: list[str],
     output_dir: str,
+    summary: Optional[str] = None,
     original_title: Optional[str] = None,
     generated_title: Optional[str] = None,
 ) -> dict:
@@ -110,6 +115,7 @@ def build_markdown_file(
         route=route.strip(),
         tags=tags,
         collected_at=collected_at,
+        summary=summary.strip() if summary else None,
         original_title=original_title.strip() if original_title else None,
         generated_title=generated_title.strip() if generated_title else None,
     )
