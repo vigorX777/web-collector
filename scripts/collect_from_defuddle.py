@@ -9,6 +9,7 @@ deduplicate -> AI analysis (title + summary + candidate tags) -> tag normalizati
 import argparse
 import json
 import os
+import re
 from urllib.parse import urlparse
 
 from env_loader import load_env_file
@@ -80,6 +81,23 @@ def derive_source(payload: dict, platform: dict) -> str:
     return netloc or "Web"
 
 
+def is_low_value_title(title: str, platform: dict) -> bool:
+    normalized = (title or "").strip()
+    if not normalized:
+        return True
+
+    platform_id = platform.get("platform_id")
+    if platform_id == "twitter":
+        lowered = normalized.lower()
+        if lowered.startswith("tweet by @"):
+            return True
+        if lowered.startswith("tweet by "):
+            return True
+        if re.match(r"^tweet\s*$", lowered):
+            return True
+    return False
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--payload-file")
@@ -124,10 +142,13 @@ def main() -> None:
         maximum=args.maximum_tags,
     )
 
-    # 默认保留抓取器提取出的原标题，AI 标题仅作为增强信息保留
+    # 默认保留抓取器提取出的原标题。
+    # 低信息量标题（如 X 帖子中的 "Tweet by @xxx"）使用 AI 标题替代。
     final_title = payload["title"]
     use_ai_title = os.environ.get("WEB_COLLECTOR_USE_AI_TITLE", "").strip().lower() in {"1", "true", "yes"}
-    if use_ai_title and generated_title:
+    if generated_title and is_low_value_title(payload["title"], platform):
+        final_title = generated_title
+    elif use_ai_title and generated_title:
         final_title = generated_title
 
     try:
