@@ -35,6 +35,11 @@ def load_markdown(path: str) -> str:
         return handle.read().strip()
 
 
+def yaml_quote(value: str) -> str:
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
 def build_frontmatter(title: str, source: str, url: str, route: str, tags: list[str], collected_at: str) -> str:
     return build_frontmatter_with_extras(
         title=title,
@@ -64,21 +69,21 @@ def build_frontmatter_with_extras(
     source_url = url.strip()
     lines = [
         "---",
-        f"title: {title}",
-        f"source: {source}",
-        f"source_url: {source_url}",
-        f"collected_at: {collected_at}",
-        f"route: {route}",
+        f"title: {yaml_quote(title)}",
+        f"source: {yaml_quote(source)}",
+        f"source_url: {yaml_quote(source_url)}",
+        f"collected_at: {yaml_quote(collected_at)}",
+        f"route: {yaml_quote(route)}",
     ]
     if summary and summary.strip():
-        lines.append(f"summary: {summary.strip()}")
+        lines.append(f"summary: {yaml_quote(summary.strip())}")
     lines.append("tags:")
     for tag in tags:
-        lines.append(f"  - {tag}")
+        lines.append(f"  - {yaml_quote(tag)}")
     if original_title and original_title != title:
-        lines.append(f"original_title: {original_title}")
+        lines.append(f"original_title: {yaml_quote(original_title)}")
     if generated_title and generated_title != title:
-        lines.append(f"generated_title: {generated_title}")
+        lines.append(f"generated_title: {yaml_quote(generated_title)}")
     lines.append("---")
     return "\n".join(lines)
 
