@@ -13,10 +13,17 @@ from typing import Optional
 from tag_rules import normalize_tag_for_obsidian
 
 
-def sanitize_filename(name: str) -> str:
+def sanitize_filename(name: str, max_bytes: int = 180) -> str:
     cleaned = re.sub(r"[\\/:*?\"<>|]+", " ", name)
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
-    return cleaned or "未命名"
+    cleaned = cleaned or "未命名"
+    # Truncate to avoid filesystem filename length limits (typically 255 bytes)
+    # Leave room for date suffix like " - 2026-04-28.md" (~15 bytes)
+    encoded = cleaned.encode("utf-8")
+    if len(encoded) > max_bytes:
+        truncated = encoded[:max_bytes].decode("utf-8", errors="ignore")
+        cleaned = truncated.rstrip()
+    return cleaned
 
 
 def parse_tags(raw: str) -> list[str]:

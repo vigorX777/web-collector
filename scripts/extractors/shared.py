@@ -28,10 +28,16 @@ class ExtractionError(Exception):
         self.retryable = retryable
 
 
-def sanitize_filename(name: str) -> str:
+def sanitize_filename(name: str, max_bytes: int = 200) -> str:
     safe = "".join(ch if ch not in '\\/:*?"<>|' else " " for ch in name)
     safe = " ".join(safe.split()).strip()
-    return safe or "untitled"
+    safe = safe or "untitled"
+    # Truncate to avoid filesystem filename length limits (typically 255 bytes)
+    encoded = safe.encode("utf-8")
+    if len(encoded) > max_bytes:
+        truncated = encoded[:max_bytes].decode("utf-8", errors="ignore")
+        safe = truncated.rstrip()
+    return safe
 
 
 def render_markdown(title: str, source: str, url: str, body: str) -> str:
