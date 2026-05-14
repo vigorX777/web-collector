@@ -1,9 +1,19 @@
 #!/usr/bin/env python3
 """
-Generate candidate title, summary, and tags via LLM API call.
+Generate candidate title, summary, and tags via LLM.
 
-Uses OpenAI-compatible chat completions API.
-Config: AI_API_BASE and AI_API_KEY in .env, or falls back to Hermes config.yaml.
+Supports two backends, auto-detected by environment:
+  OpenClaw mode:  subprocess call to `openclaw agent --local`
+  API mode:       OpenAI-compatible chat completions (Hermes / DeepSeek / etc.)
+
+Selection (first match wins):
+  1. AI_ANALYSIS_MODE env var: "openclaw" | "api" | "auto"
+  2. Auto-detect: if `openclaw` CLI exists → OpenClaw, else → API
+
+API config (env vars, optional — falls back to Hermes config.yaml):
+  AI_API_BASE   — OpenAI-compatible base URL
+  AI_API_KEY    — API key
+  AI_API_MODEL  — model name (default: deepseek-v4-flash)
 """
 
 import argparse
@@ -11,11 +21,13 @@ import hashlib
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
 import time
 import uuid
-import urllib.request
 import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import List, Tuple
 
@@ -23,7 +35,41 @@ from env_loader import load_env_file
 
 load_env_file()
 
-# ── API config resolution ──────────────────────────────────────────
+# ── Mode detection ──────────────────────────────────────────────────
+
+def _detect_mode() -> str:
+    """Return 'openclaw' or 'api' based on env var or auto-detection."""
+    mode = os.environ.get("AI_ANALYSIS_MODE", "auto").strip().lower()
+    if mode in ("openclaw", "api"):
+        return mode
+    # auto: prefer openclaw if available
+    if shutil.which("openclaw"):
+        return "openclaw"
+    return "api"
+
+
+# ── OpenClaw backend ────────────────────────────────────────────────
+
+def _build_session_id(seed: str) -> str:
+    digest = hashlib.sha1(seed.encode("utf-8")).hexdigest()[:8]
+    suffix = uuid.uuid4().hex[:8]
+    return f"web-collector-{int(time.time())}-{digest}-{suffix}"
+
+
+def _analyze_via_openclaw(prompt: str, session_id: str, timeout: int = 120) -> str:
+    """Call openclaw agent CLI and return raw response text."""
+    result = subprocess.run(
+        ["openclaw", "agent", "--local", "--session-id", session_id, "-m", prompt],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"openclaw exited {result.returncode}: {result.stderr}")
+    return result.stdout.strip()
+
+
+# ── API backend ─────────────────────────────────────────────────────
 
 def _resolve_api_config() -> Tuple[str, str, str]:
     """Resolve API base URL, key, and model from env or Hermes config."""
@@ -32,9 +78,8 @@ def _resolve_api_config() -> Tuple[str, str, str]:
     model = os.environ.get("AI_API_MODEL", "")
 
     if base and key:
-        return base, key, model or "deepseek-v4-pro"
+        return base, key, model or "deepseek-v4-flash"
 
-    # Fallback: read from Hermes config.yaml
     hermes_config = Path.home() / ".hermes" / "config.yaml"
     if hermes_config.exists():
         try:
@@ -48,14 +93,12 @@ def _resolve_api_config() -> Tuple[str, str, str]:
                 if m:
                     key = m.group(1)
             if not model:
-                # Try provider-specific model first (deepseek > openrouter)
                 for provider in ["deepseek", "openrouter"]:
                     pattern = rf'{provider}:.*?\n\s+model:\s*(\S+)'
                     m = re.search(pattern, content, re.DOTALL)
                     if m and m.group(1):
                         model = m.group(1)
                         break
-                # Fallback: any non-empty model line
                 if not model:
                     for m in re.finditer(r'^\s*model:\s*(\S+)', content, re.MULTILINE):
                         if m.group(1):
@@ -67,7 +110,7 @@ def _resolve_api_config() -> Tuple[str, str, str]:
     return base, key, model or "deepseek-v4-flash"
 
 
-def _chat_completion(
+def _analyze_via_api(
     system_prompt: str,
     user_prompt: str,
     timeout: int = 120,
@@ -107,7 +150,7 @@ def _chat_completion(
         raise RuntimeError(f"Invalid API response: {e}")
 
 
-# ── Content processing ─────────────────────────────────────────────
+# ── Content processing (shared) ─────────────────────────────────────
 
 def load_content(content_file: str) -> str:
     with open(content_file, "r", encoding="utf-8") as handle:
@@ -178,6 +221,32 @@ Twitter/X→XTwitter
 """
 
 
+def _parse_json_response(raw: str) -> Tuple[str, str, List[str]]:
+    """Extract title, summary, tags from LLM response (handles fences etc.)."""
+    output = raw.strip()
+
+    # Remove ```json fences
+    code_match = re.search(r"```(?:json)?\s*([\s\S]*?)```", output)
+    if code_match:
+        output = code_match.group(1).strip()
+
+    # Extract outermost JSON object
+    json_match = re.search(r"\{[\s\S]*\}", output)
+    if json_match:
+        output = json_match.group()
+
+    data = json.loads(output)
+    generated_title = data.get("title", "").strip()
+    summary = data.get("summary", "").strip()
+    tags = data.get("tags", [])
+    if not isinstance(tags, list):
+        tags = []
+    tags = [str(tag).strip() for tag in tags if str(tag).strip()]
+    return generated_title, summary, tags
+
+
+# ── Unified entry point ─────────────────────────────────────────────
+
 def analyze_content(
     original_title: str,
     content: str,
@@ -186,46 +255,45 @@ def analyze_content(
     max_content_len: int = 3200,
 ) -> Tuple[str, str, List[str]]:
     sampled = sample_content(content, max_content_len=max_content_len)
-    user_prompt = build_prompt(original_title, sampled, source)
-    system_prompt = "你是一个专业的内容分析助手。只输出 JSON，不要有任何额外文字。"
+    prompt = build_prompt(original_title, sampled, source)
+    mode = _detect_mode()
 
     try:
-        output = _chat_completion(
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            timeout=120,
-        )
+        if mode == "openclaw":
+            session_id = _build_session_id(url or original_title)
+            raw = _analyze_via_openclaw(prompt, session_id)
+        else:
+            system_prompt = "你是一个专业的内容分析助手。只输出 JSON，不要有任何额外文字。"
+            raw = _analyze_via_api(system_prompt, prompt)
 
-        # Extract JSON from response (handle ```json fences or bare JSON)
-        code_match = re.search(r"```(?:json)?\s*([\s\S]*?)```", output)
-        if code_match:
-            output = code_match.group(1).strip()
-
-        json_match = re.search(r"\{[\s\S]*\}", output)
-        if json_match:
-            output = json_match.group()
-
-        data = json.loads(output)
-        generated_title = data.get("title", original_title)
-        summary = data.get("summary", "")
-        tags = data.get("tags", [])
-        if not isinstance(tags, list):
-            tags = []
-        tags = [str(tag).strip() for tag in tags if str(tag).strip()]
-        return generated_title, summary, tags
+        return _parse_json_response(raw)
 
     except Exception as error:
-        print(f"Warning: AI analysis failed: {error}", file=sys.stderr)
+        print(f"Warning: AI analysis failed [{mode} mode]: {error}", file=sys.stderr)
         return "", "", []
 
 
+# ── CLI ─────────────────────────────────────────────────────────────
+
 def main() -> int:
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        description="AI content analysis (dual-mode: openclaw / api)"
+    )
     parser.add_argument("--title", required=True)
     parser.add_argument("--content-file", required=True)
     parser.add_argument("--source", default="")
     parser.add_argument("--url", default="")
+    parser.add_argument(
+        "--mode", choices=["openclaw", "api", "auto"], default=None,
+        help="Override AI_ANALYSIS_MODE env var for this run"
+    )
     args = parser.parse_args()
+
+    if args.mode:
+        os.environ["AI_ANALYSIS_MODE"] = args.mode
+
+    mode = _detect_mode()
+    print(f"[INFO] AI analysis mode: {mode}", file=sys.stderr)
 
     if not os.path.exists(args.content_file):
         print(json.dumps({
@@ -252,6 +320,7 @@ def main() -> int:
             "title": generated_title,
             "summary": summary,
             "tags": tags,
+            "mode": mode,
         },
     }, ensure_ascii=False, indent=2))
     return 0

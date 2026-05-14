@@ -192,26 +192,41 @@ python3 scripts/extract_content.py "https://x.com/user/status/123"
 
 ## 常见问题与回退策略
 
-### AI 分析不可用
+### AI 分析不可用 ✅ 双模式支持 (2026-05-14)
 
-`collect_from_defuddle.py` 中的 AI 分析步骤调用 `openclaw agent --local`，在 Hermes 环境上此 CLI 不存在，AI 生成标题/摘要/候选标签会静默失败（仅输出 Warning）。
+`ai_content_analyzer.py` 支持两种后端，按环境自动切换：
 
-**表现**：`candidate_tags` 为空数组，`summary` 为空字符串，标签退回 fallback 规则（通常 3 个）。
+| 环境 | 模式 | 后端 |
+|------|------|------|
+| OpenClaw | `openclaw` | `openclaw agent --local` CLI |
+| Hermes | `api` | OpenAI 兼容 API（自动读 Hermes config.yaml） |
 
-**应对**：当前可接受 —— fallback 标签规则（`tag_rules.py`）仍能产出合规标签。如需恢复 AI 分析，需将 `ai_content_analyzer.py` 改为调用 Hermes 的 LLM 接口。详见 `references/hermes-migration.md`。
+**自动检测**：检查 `openclaw` CLI 是否存在，有则 OpenClaw 模式，无则 API 模式。  
+**手动覆盖**：`AI_ANALYSIS_MODE=openclaw` 或 `--mode api` CLI 参数。  
+**降级**：失败时输出 Warning，回退到 `tag_rules.py` 规则标签。
 
 ### OneDrive 上传失败
 
 常见原因：
 
-1. **Refresh token 过期** — token 生命周期有限，过期后需重新授权。推荐两阶段流程（适合 Agent 环境）：
+1. **Refresh token 过期** — token 生命周期有限，过期后需重新授权。
 
-```bash
-# 阶段 1：获取验证码，告知用户去浏览器输入
-python3 scripts/onedrive_device_code.py request
+**Agent 环境专用：两阶段授权流程**
 
-# 阶段 2：后台轮询，拿到 token 自动更新 .env
-python3 scripts/onedrive_device_code.py poll --update-env
+> ⚠️ 绝对不要用 `execute_code` 跑 OAuth 交互流程 —— 用户看不到中间输出，验证码永远浪费。  
+> ⚠️ 不要用 `terminal` 前台跑 `poll` —— 5-15 分钟阻塞整个对话。
+
+正确分两步，用不同的 Hermes 工具：
+
+```
+第 1 步（terminal 前台）：获取验证码
+  python3 scripts/onedrive_device_code.py request
+  → 用户立即看到 code → 去浏览器授权
+
+第 2 步（terminal 后台）：轮询等 token
+  python3 scripts/onedrive_device_code.py poll --update-env
+  → terminal(background=true), notify_on_complete=true
+  → 拿到 refresh_token 自动写入 .env
 ```
 
 也支持旧的单次阻塞模式：`python3 scripts/onedrive_device_code.py`（交互式终端可用）
