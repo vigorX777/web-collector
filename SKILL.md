@@ -13,8 +13,9 @@ description: "当用户在聊天窗口发送一个或多个链接，并希望默
 
 在这些场景使用：
 
-- 用户发送一个或多个链接，希望“收藏”“保存”“整理”
+- 用户发送一个或多个链接，希望"收藏""保存""整理"
 - 用户没有特别说明目标流程时，默认进入内部收藏
+- **用户在聊天中发送任何链接，默认即走此 skill**（已设为用户偏好）
 - 需要根据平台自动选择合适的抓取器
 - 需要把结果保存到 OneDrive，而不是飞书
 
@@ -23,6 +24,27 @@ description: "当用户在聊天窗口发送一个或多个链接，并希望默
 - 只想看网页摘要，不需要落库
 - 需要自动 fallback 到其他抓取器
 - 需要写入飞书文档
+
+## 运行前提
+
+### 必须安装
+
+```bash
+sudo npm install -g defuddle
+```
+
+`defuddle` 是通用网页和微信公众号的抓取器。微信文章走 `defuddle_extractor.extract_wechat()` 内建路径（fetch HTML → 提取 js_content → 包成最小 HTML → `defuddle parse --md`），其他网页走 `defuddle parse --json --md` 直接抓取。
+
+### OneDrive 配置（`.env` 文件）
+
+skill 根目录的 `.env` 需要包含：
+
+- `ONEDRIVE_CLIENT_ID` — Azure App Registration
+- `ONEDRIVE_REFRESH_TOKEN` — 通过 device code flow 获取
+- `ONEDRIVE_TARGET_PATH` — OneDrive 中的目标目录（如 `/✒️ 文稿项目/剪藏文件`）
+- `WEB_COLLECTOR_OUTPUT_DIR` — 本地缓存目录
+
+**迁移注意**：从 OpenClaw 迁移到 Hermes 后，`.env` 中的路径必须更新。旧路径如 `/root/.openclaw/workspace/skills/web-collector/...` 需要改为 Hermes 技能目录下的路径。详见 `references/hermes-migration.md`。
 
 ## 核心约束
 
@@ -168,11 +190,47 @@ python3 scripts/extract_content.py "https://x.com/user/status/123"
 - `ONEDRIVE_UPLOAD_FAILED`
 - `CONFIG_MISSING`
 
-## 运行前提
+## 常见问题与回退策略
 
-还需要用户提供或确认：
+### AI 分析不可用
 
-- OneDrive 目标目录
-- `defuddle` 在目标运行环境中可用
-- `x-tweet-fetcher` 在目标运行环境中可访问
-- `.env` 文件在目标运行环境中可读（若依赖 `.env` 配置）
+`collect_from_defuddle.py` 中的 AI 分析步骤调用 `openclaw agent --local`，在 Hermes 环境上此 CLI 不存在，AI 生成标题/摘要/候选标签会静默失败（仅输出 Warning）。
+
+**表现**：`candidate_tags` 为空数组，`summary` 为空字符串，标签退回 fallback 规则（通常 3 个）。
+
+**应对**：当前可接受 —— fallback 标签规则（`tag_rules.py`）仍能产出合规标签。如需恢复 AI 分析，需将 `ai_content_analyzer.py` 改为调用 Hermes 的 LLM 接口。详见 `references/hermes-migration.md`。
+
+### OneDrive 上传失败
+
+常见原因：
+
+1. **Refresh token 过期** — token 生命周期有限，过期后需重新授权。推荐两阶段流程（适合 Agent 环境）：
+
+```bash
+# 阶段 1：获取验证码，告知用户去浏览器输入
+python3 scripts/onedrive_device_code.py request
+
+# 阶段 2：后台轮询，拿到 token 自动更新 .env
+python3 scripts/onedrive_device_code.py poll --update-env
+```
+
+也支持旧的单次阻塞模式：`python3 scripts/onedrive_device_code.py`（交互式终端可用）
+2. **网络不通** — 服务器需能访问 `login.microsoftonline.com` 和 `graph.microsoft.com`
+3. **Token 被撤销** — 密码变更或安全策略触发
+
+**降级方案**：使用 `--skip-upload` 参数跳过上传，仅本地保存：
+
+```bash
+python3 scripts/collect_from_defuddle.py --payload-file payload.json --skip-upload
+```
+
+### 环境迁移（OpenClaw → Hermes）
+
+从 OpenClaw 迁移到 Hermes 后需检查：
+
+- `.env` 中的 `WEB_COLLECTOR_OUTPUT_DIR` 路径（旧：`/root/.openclaw/...`）
+- `defuddle` 是否已安装（`which defuddle`）
+- OneDrive token 是否仍然有效
+- `openclaw` CLI 已不存在，AI 分析功能降级
+
+详见 `references/hermes-migration.md`。
