@@ -27,13 +27,13 @@ CACHE_FILE = os.environ.get(
 )
 CACHE_BUFFER_SECONDS = int(os.environ.get("ONEDRIVE_TOKEN_CACHE_BUFFER", "300"))
 
-# 代理设置
-PROXY_HOST = os.environ.get("ONEDRIVE_PROXY_HOST", "127.0.0.1:7890")
-
 
 def get_proxy_handler():
-    """创建代理处理器"""
-    proxy_url = f"http://{PROXY_HOST}"
+    """创建代理处理器，如果未配置代理则直连"""
+    proxy_host = os.environ.get("ONEDRIVE_PROXY_HOST", "").strip()
+    if not proxy_host:
+        return urllib.request.ProxyHandler({})  # 直连
+    proxy_url = f"http://{proxy_host}"
     return urllib.request.ProxyHandler({
         'http': proxy_url,
         'https': proxy_url
