@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
-Generate candidate title, summary, and tags with a single AI call.
+Generate candidate title, summary, and tags via LLM API call.
+
+Uses OpenAI-compatible chat completions API.
+Config: AI_API_BASE and AI_API_KEY in .env, or falls back to Hermes config.yaml.
 """
 
 import argparse
@@ -8,22 +11,107 @@ import hashlib
 import json
 import os
 import re
-import subprocess
 import sys
 import time
 import uuid
+import urllib.request
+import urllib.error
+from pathlib import Path
 from typing import List, Tuple
 
+from env_loader import load_env_file
+
+load_env_file()
+
+# ── API config resolution ──────────────────────────────────────────
+
+def _resolve_api_config() -> Tuple[str, str, str]:
+    """Resolve API base URL, key, and model from env or Hermes config."""
+    base = os.environ.get("AI_API_BASE", "")
+    key = os.environ.get("AI_API_KEY", "")
+    model = os.environ.get("AI_API_MODEL", "")
+
+    if base and key:
+        return base, key, model or "deepseek-v4-pro"
+
+    # Fallback: read from Hermes config.yaml
+    hermes_config = Path.home() / ".hermes" / "config.yaml"
+    if hermes_config.exists():
+        try:
+            content = hermes_config.read_text()
+            if not base:
+                m = re.search(r'^\s*base_url:\s*(\S+)', content, re.MULTILINE)
+                if m:
+                    base = m.group(1)
+            if not key:
+                m = re.search(r'^\s*api_key:\s*(\S+)', content, re.MULTILINE)
+                if m:
+                    key = m.group(1)
+            if not model:
+                # Try provider-specific model first (deepseek > openrouter)
+                for provider in ["deepseek", "openrouter"]:
+                    pattern = rf'{provider}:.*?\n\s+model:\s*(\S+)'
+                    m = re.search(pattern, content, re.DOTALL)
+                    if m and m.group(1):
+                        model = m.group(1)
+                        break
+                # Fallback: any non-empty model line
+                if not model:
+                    for m in re.finditer(r'^\s*model:\s*(\S+)', content, re.MULTILINE):
+                        if m.group(1):
+                            model = m.group(1)
+                            break
+        except Exception:
+            pass
+
+    return base, key, model or "deepseek-v4-flash"
+
+
+def _chat_completion(
+    system_prompt: str,
+    user_prompt: str,
+    timeout: int = 120,
+) -> str:
+    """Call OpenAI-compatible chat completions API, return response text."""
+    base, key, model = _resolve_api_config()
+    if not base or not key:
+        raise RuntimeError(
+            "AI_API_BASE and AI_API_KEY not configured. "
+            "Set them in .env or ensure Hermes config.yaml has base_url and api_key."
+        )
+
+    url = base.rstrip("/") + "/chat/completions"
+    body = json.dumps({
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        "temperature": 0.3,
+        "max_tokens": 1024,
+    }).encode("utf-8")
+
+    req = urllib.request.Request(url, data=body, method="POST")
+    req.add_header("Authorization", f"Bearer {key}")
+    req.add_header("Content-Type", "application/json")
+
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            content = data["choices"][0]["message"]["content"]
+            return content.strip()
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"API error {e.code}: {detail}") from e
+    except (KeyError, IndexError, json.JSONDecodeError) as e:
+        raise RuntimeError(f"Invalid API response: {e}")
+
+
+# ── Content processing ─────────────────────────────────────────────
 
 def load_content(content_file: str) -> str:
     with open(content_file, "r", encoding="utf-8") as handle:
         return handle.read()
-
-
-def build_session_id(seed: str) -> str:
-    digest = hashlib.sha1(seed.encode("utf-8")).hexdigest()[:8]
-    suffix = uuid.uuid4().hex[:8]
-    return f"web-collector-{int(time.time())}-{digest}-{suffix}"
 
 
 def sample_content(content: str, max_content_len: int = 3200) -> str:
@@ -61,7 +149,7 @@ def build_prompt(original_title: str, content: str, source: str) -> str:
 - 主题是什么
 - 关键观点/做法是什么
 - 有什么特别值得记住的信息
-3. 摘要避免空泛评价，不要写“本文介绍了”“这篇文章讲了”这类套话
+3. 摘要避免空泛评价，不要写"本文介绍了""这篇文章讲了"这类套话
 4. 优先保证信息完整和信息密度，不限制句数和字数
 5. 标签输出 3-5 个即可
 6. 标签只允许三类：
@@ -98,21 +186,17 @@ def analyze_content(
     max_content_len: int = 3200,
 ) -> Tuple[str, str, List[str]]:
     sampled = sample_content(content, max_content_len=max_content_len)
-    prompt = build_prompt(original_title, sampled, source)
-    session_id = build_session_id(url or original_title)
+    user_prompt = build_prompt(original_title, sampled, source)
+    system_prompt = "你是一个专业的内容分析助手。只输出 JSON，不要有任何额外文字。"
 
     try:
-        result = subprocess.run(
-            ["openclaw", "agent", "--local", "--session-id", session_id, "-m", prompt],
-            capture_output=True,
-            text=True,
+        output = _chat_completion(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
             timeout=120,
         )
 
-        if result.returncode != 0:
-            raise Exception(f"AI call failed: {result.stderr}")
-
-        output = result.stdout.strip()
+        # Extract JSON from response (handle ```json fences or bare JSON)
         code_match = re.search(r"```(?:json)?\s*([\s\S]*?)```", output)
         if code_match:
             output = code_match.group(1).strip()
