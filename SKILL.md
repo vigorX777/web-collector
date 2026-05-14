@@ -35,6 +35,16 @@ sudo npm install -g defuddle
 
 `defuddle` 是通用网页和微信公众号的抓取器。微信文章走 `defuddle_extractor.extract_wechat()` 内建路径（fetch HTML → 提取 js_content → 包成最小 HTML → `defuddle parse --md`），其他网页走 `defuddle parse --json --md` 直接抓取。
 
+### Twitter/X 支持
+
+X/Twitter 抓取依赖 `x-tweet-fetcher` 外部 skill（不在本仓库内）：
+
+```bash
+bash scripts/setup.sh
+```
+
+`setup.sh` 自动将 `x-tweet-fetcher` 克隆/更新到 `openclaw-imports/x-tweet-fetcher/`，源仓库为 `ythx-101/x-tweet-fetcher`。抓取器入口在 `x-tweet-fetcher/scripts/fetch_tweet.py`。可通过 `WEB_COLLECTOR_X_TWEET_FETCHER_DIR` 环境变量自定义路径。
+
 ### OneDrive 配置（`.env` 文件）
 
 skill 根目录的 `.env` 需要包含：
@@ -43,6 +53,7 @@ skill 根目录的 `.env` 需要包含：
 - `ONEDRIVE_REFRESH_TOKEN` — 通过 device code flow 获取
 - `ONEDRIVE_TARGET_PATH` — OneDrive 中的目标目录（如 `/✒️ 文稿项目/剪藏文件`）
 - `WEB_COLLECTOR_OUTPUT_DIR` — 本地缓存目录
+- `ONEDRIVE_PROXY_HOST` — 可选，HTTP 代理地址（如 `127.0.0.1:7890`）。服务器在国内无法直连 Microsoft 时必填。`upload_to_onedrive.py` 自动读取此变量走代理，未设置则直连。
 
 **迁移注意**：从 OpenClaw 迁移到 Hermes 后，`.env` 中的路径必须更新。旧路径如 `/root/.openclaw/workspace/skills/web-collector/...` 需要改为 Hermes 技能目录下的路径。详见 `references/hermes-migration.md`。
 
@@ -151,6 +162,7 @@ python3 scripts/extract_content.py "https://x.com/user/status/123"
 
 ## 脚本
 
+- `scripts/setup.sh` — 初始化/更新外部依赖
 - `scripts/extract_content.py`
 - `scripts/export_from_defuddle.py`
 - `scripts/collect_from_defuddle.py`
@@ -203,7 +215,10 @@ python3 scripts/extract_content.py "https://x.com/user/status/123"
 
 **自动检测**：检查 `openclaw` CLI 是否存在，有则 OpenClaw 模式，无则 API 模式。  
 **手动覆盖**：`AI_ANALYSIS_MODE=openclaw` 或 `--mode api` CLI 参数。  
-**降级**：失败时输出 Warning，回退到 `tag_rules.py` 规则标签。
+**降级**：失败时输出 Warning，回退到 `tag_rules.py` 规则标签。  
+**代理**：API 模式通过系统 `HTTP_PROXY`/`HTTPS_PROXY` 环境变量自动走代理（Python urllib 默认行为），无需额外配置。如需不走代理（如国内 API），在 `NO_PROXY` 中加对应域名。
+
+> ⚠️ API 模式默认使用 `deepseek-v4-flash`。不要改用 `v4-pro` 等推理模型——详见 `references/deepseek-reasoning-pitfall.md`。
 
 ### OneDrive 上传失败
 
@@ -246,6 +261,11 @@ python3 scripts/collect_from_defuddle.py --payload-file payload.json --skip-uplo
 - `.env` 中的 `WEB_COLLECTOR_OUTPUT_DIR` 路径（旧：`/root/.openclaw/...`）
 - `defuddle` 是否已安装（`which defuddle`）
 - OneDrive token 是否仍然有效
-- `openclaw` CLI 已不存在，AI 分析功能降级
+- `openclaw` CLI 已不存在，✅ 已适配：AI 分析自动切换到 API 模式
 
 详见 `references/hermes-migration.md`。
+
+## 参考文档
+
+- `references/hermes-migration.md` — OpenClaw → Hermes 迁移完整记录
+- `references/agent-oauth-pattern.md` — Agent 环境下 OAuth 设备码两阶段模式（可复用于任何 OAuth 流）
